@@ -10,7 +10,7 @@ inline namespace MIGRAPHX_INLINE_NS {
 namespace gpu {
 namespace device {
 
-void upsample(hipStream_t stream, const argument& result, const argument& arg, const std::vector<float> &scales,int mode,int align_corners);
+void upsample(hipStream_t stream, const argument& result, const argument& arg, const std::vector<float> &scales,int mode,std::string coordinate_transformation_mode);
 
 } // namespace device
 } // namespace gpu

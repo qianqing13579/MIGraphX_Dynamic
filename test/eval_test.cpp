@@ -44,7 +44,7 @@ struct id_target
     {
         return {};
     }
-    migraphx::context get_context() const { return ctx; }
+    migraphx::context get_context(std::size_t device_id) const { return ctx; }
 };
 
 struct id_ctx_op
@@ -105,7 +105,7 @@ struct reverse_target
     {
         return {reverse_pass{}};
     }
-    migraphx::context get_context() const { return {}; }
+    migraphx::context get_context(std::size_t device_id) const { return {}; }
 };
 
 struct invert_pass
@@ -136,7 +136,7 @@ struct invert_target
     {
         return {invert_pass{}};
     }
-    migraphx::context get_context() const { return {}; }
+    migraphx::context get_context(std::size_t device_id) const { return {}; }
 };
 
 struct double_invert_target
@@ -147,7 +147,7 @@ struct double_invert_target
     {
         return {invert_pass{}, invert_pass{}};
     }
-    migraphx::context get_context() const { return {}; }
+    migraphx::context get_context(std::size_t device_id) const { return {}; }
 };
 
 TEST_CASE(literal_test1)
@@ -454,7 +454,7 @@ TEST_CASE(eval_context1)
     migraphx::program p;
     auto* mm = p.get_main_module();
     id_target t{};
-    EXPECT(is_shared(t.ctx, t.get_context()));
+    EXPECT(is_shared(t.ctx, t.get_context(0)));
     auto one = mm->add_literal(1);
     auto two = mm->add_literal(2);
     mm->add_instruction(sum_op{}, one, two);
@@ -469,7 +469,7 @@ TEST_CASE(eval_context2)
     migraphx::program p;
     auto* mm = p.get_main_module();
     id_target t{};
-    EXPECT(is_shared(t.ctx, t.get_context()));
+    EXPECT(is_shared(t.ctx, t.get_context(0)));
     auto one = mm->add_literal(1);
     auto two = mm->add_literal(2);
     mm->add_instruction(id_ctx_op{}, one, two);
@@ -485,7 +485,7 @@ TEST_CASE(eval_context3)
     migraphx::program p;
     auto* mm = p.get_main_module();
     id_target t{};
-    EXPECT(is_shared(t.ctx, t.get_context()));
+    EXPECT(is_shared(t.ctx, t.get_context(0)));
     auto one = mm->add_literal(1);
     auto two = mm->add_literal(2);
     mm->add_instruction(id_ctx_final_op{}, one, two);

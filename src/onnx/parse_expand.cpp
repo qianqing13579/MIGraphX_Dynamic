@@ -52,7 +52,12 @@ struct parse_expand : op_parser<parse_expand>
             std::vector<std::size_t> dims;
             arg_s.visit([&](auto input) { dims.assign(input.begin(), input.end()); });
             auto out_lens = compute_broadcasted_lens(in_lens, dims);
-            return info.add_instruction(make_op("multibroadcast_dynamic", {{"max_out_lens", out_lens}}), args);
+            int is_const=0;
+            if(args[1]->name()=="@literal")
+            {
+                is_const=1;
+            }
+            return info.add_instruction(make_op("multibroadcast_dynamic", {{"max_out_lens", out_lens},{"max_dims", dims},{"is_const",is_const}}), args);
 
         }
         else

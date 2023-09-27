@@ -39,11 +39,17 @@ struct slice_dynamic
     std::vector<int64_t> axes;
     std::vector<int64_t> starts;
     std::vector<int64_t> ends;
+    int is_const_stars=0;
+    int is_const_ends=0;
 
     template <class Self, class F>
     static auto reflect(Self& self, F f)
     {
-        return pack(f(self.axes, "axes"), f(self.starts, "max_starts"), f(self.ends, "max_ends"));
+        return pack(f(self.axes, "axes"), 
+                    f(self.starts, "max_starts"), 
+                    f(self.ends, "max_ends"),
+                    f(self.is_const_stars,"is_const_stars"),
+                    f(self.is_const_ends,"is_const_ends"));
     }
 
     value attributes() const

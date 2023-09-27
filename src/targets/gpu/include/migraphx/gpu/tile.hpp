@@ -21,27 +21,49 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef MIGRAPHX_GUARD_RTGLIB_TILE_HPP
+#define MIGRAPHX_GUARD_RTGLIB_TILE_HPP
 
-#include "verify_program.hpp"
-#include <migraphx/program.hpp>
-#include <migraphx/generate.hpp>
-#include <migraphx/make_op.hpp>
+#include <migraphx/argument.hpp>
+#include <migraphx/reflect.hpp>
+#include <migraphx/op/tile.hpp>
+#include <migraphx/gpu/context.hpp>
 
-struct test_gather : verify_program<test_gather>
+namespace migraphx {
+inline namespace MIGRAPHX_INLINE_NS {
+namespace gpu {
+
+struct context;
+
+struct hip_tile
 {
-    migraphx::program create_program() const
+    op::tile op;
+
+    template <class Self, class F>
+    static auto reflect(Self& self, F f)
     {
-        migraphx::program p;
-        auto* mm = p.get_main_module();
-        migraphx::shape s{migraphx::shape::float_type, {3, 3}};
-        migraphx::shape s_indices{migraphx::shape::int32_type, {2, 2}};
-        std::vector<int> indices{1, 2, 2, 1};
-        auto a0  = mm->add_parameter("data", s);
-        auto a1  = mm->add_literal(migraphx::literal{s_indices, indices});
-        int axis = 0;
-        auto r = mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
-        mm->add_return({r});
-        
-        return p;
+        return migraphx::reflect(self.op, f);
+    }
+
+    std::string name() const { return "gpu::tile"; }
+    shape compute_shape(std::vector<shape> inputs) const;
+    argument
+    compute(context& ctx, const shape& output_shape, const std::vector<argument>& args) const;
+    std::ptrdiff_t output_alias(const std::vector<shape>& shapes) const
+    {
+        return shapes.size() - 1;
+    }
+
+    // dynamic shape
+    bool do_reshape(instruction_ref ins,std::unordered_map<instruction_ref, argument> &results)
+    {
+        // 不需要执行reshape,在运行期执行reshape
+        return false;
     }
 };
+
+} // namespace gpu
+} // namespace MIGRAPHX_INLINE_NS
+} // namespace migraphx
+
+#endif

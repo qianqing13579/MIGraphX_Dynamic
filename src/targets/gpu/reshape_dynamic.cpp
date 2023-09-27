@@ -73,23 +73,36 @@ static shape compute_shape_dynamic(const shape& input,const std::vector<int64_t>
 
 argument hip_reshape_dynamic::compute(context& ctx, const shape& output_shape, const std::vector<argument>& args) const
 {
-    // 计算dim，shape tensor在FP16模式下还是float类型
-    std::vector<float> shape_data(args.back().get_shape().elements());
-
-    // 拷贝到gpu
-    hipMemcpyAsync(shape_data.data(), args.back().data(), args.back().get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
     
-    ctx.finish();
-    
-    // 重新计算输出shape
-    std::vector<int64_t> shape_data2(args.back().get_shape().elements());
-    for(int i=0;i<shape_data.size();++i)
+    if(op.is_const==1)
     {
-        shape_data2[i]=static_cast<int64_t>(shape_data[i]);
+        shape new_shape=compute_shape_dynamic(args.front().get_shape(),op.dims);
+        return args[0].reshape(new_shape);
     }
-    shape new_shape=compute_shape_dynamic(args.front().get_shape(),shape_data2);
+    else
+    {
+        // 计算dim，shape tensor在FP16模式下还是float类型
+        std::vector<float> shape_data(args.back().get_shape().elements());
+
+        // 拷贝到gpu
+        hipMemcpyAsync(shape_data.data(), args.back().data(), args.back().get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+        
+        ctx.finish();
+        
+        std::vector<int64_t> shape_data2(args.back().get_shape().elements());
+        for(int i=0;i<shape_data.size();++i)
+        {
+            shape_data2[i]=static_cast<int64_t>(shape_data[i]);
+        }
+
+        // 重新计算输出shape
+        shape new_shape=compute_shape_dynamic(args.front().get_shape(),shape_data2);
     
-    return args[0].reshape(new_shape);
+        return args[0].reshape(new_shape);
+
+    }
+    
+    
 
 }
 

@@ -279,7 +279,10 @@ struct loader
         else if(type == "json")
             *os << to_json_string(p.to_value()) << std::endl;
         else if(type == "binary")
+        {
             write(*os, save_buffer(p));
+            printf("%s saved\n",output.c_str());
+        }
     }
 };
 
@@ -400,8 +403,14 @@ struct params : command<params>
     void run()
     {
         auto p = l.load();
-        for(auto&& param : p.get_parameter_shapes())
-            std::cout << param.first << ": " << param.second << std::endl;
+
+        printf("inputs:\n");
+        for(auto&& input : p.get_inputs())
+            std::cout << input.first << ": " << input.second << std::endl;
+
+        printf("\noutputs:\n");
+        for(auto&& output : p.get_outputs())
+            std::cout << output.first << ": " << output.second << std::endl;
     }
 };
 
@@ -467,11 +476,28 @@ struct verify : command<verify>
 
 struct version : command<version>
 {
-    void parse(const argument_parser&) {}
+    std::string mxr_path;
+    void parse(argument_parser& ap) 
+    {
+        ap(mxr_path, {"--migraphx", "-m"}, ap.help("mxr file path"));
+    }
     void run() const
     {
-        std::cout << "MIGraphX Version: " << MIGRAPHX_VERSION_MAJOR << "." << MIGRAPHX_VERSION_MINOR << "." << MIGRAPHX_VERSION_PATCH
-                  << std::endl;
+        if(mxr_path.empty()||
+            (!mxr_path.empty()&&!ends_with(mxr_path, ".mxr")))
+        {
+            program p;
+            std::cout << "MIGraphX version: " << MIGRAPHX_VERSION_MAJOR << "." << MIGRAPHX_VERSION_MINOR << "." << MIGRAPHX_VERSION_PATCH<< std::endl;
+            std::cout << "ONNX Opset version: " <<"17"<< std::endl; 
+            std::cout << "MXR version: " << p.get_mxr_version()<< std::endl;
+
+        }
+        else if(!mxr_path.empty()&&ends_with(mxr_path, ".mxr"))
+        {
+            std::cout << "Reading: " << mxr_path << std::endl;
+            std::cout<<"MXR version:"<<load_mxr_version(mxr_path)<<std::endl;
+        }
+        
     }
 };
 
@@ -589,6 +615,19 @@ struct onnx : command<onnx>
     }
 };
 
+struct mxr : command<mxr>
+{
+    std::string mxr_path;
+    void parse(argument_parser& ap)
+    {
+        ap(mxr_path, {"--path", "-p"}, ap.help("mxr file path"));
+    }
+    void run() const
+    {
+        std::cout<<"MXR version:"<<load_mxr_version(mxr_path)<<std::endl;
+    }
+};
+
 struct main_command
 {
     static std::string get_command_help(const std::string& title = colorize(color::fg_yellow,
@@ -607,9 +646,12 @@ struct main_command
     }
     void parse(argument_parser& ap)
     {
+        program p;
         std::string version_str = "MIGraphX Version: " + std::to_string(MIGRAPHX_VERSION_MAJOR) +
                                   "." + std::to_string(MIGRAPHX_VERSION_MINOR) + 
-                                  "." + std::to_string(MIGRAPHX_VERSION_PATCH);
+                                  "." + std::to_string(MIGRAPHX_VERSION_PATCH) +
+                                  "\nMXR Version: " + std::to_string(p.get_mxr_version());
+        
         ap(wrong_commands, {}, ap.metavar("<command>"), ap.append());
         ap(nullptr, {"-h", "--help"}, ap.help("Show help"), ap.show_help(get_command_help()));
         ap(nullptr,

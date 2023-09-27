@@ -39,11 +39,13 @@ namespace op {
 struct multibroadcast_dynamic
 {
     std::vector<std::size_t> output_lens;
+    std::vector<std::size_t> dims;
+    int is_const=0;
 
     template <class Self, class F>
     static auto reflect(Self& self, F f)
     {
-        return pack(f(self.output_lens, "max_out_lens"));
+        return pack(f(self.output_lens, "max_out_lens"),f(self.dims, "max_dims"),f(self.is_const,"is_const"));
     }
 
     std::string name() const { return "multibroadcast_dynamic"; }

@@ -63,7 +63,7 @@ set(CMAKE_EXTRA_INCLUDE_FILES)
 
 include(ROCMSetupVersion)
 
-rocm_setup_version(VERSION 3.2.0)
+rocm_setup_version(VERSION 3.3.0)
 set(MIGRAPHX_SO_VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH})
 
 option( BUILD_SHARED_LIBS "Build as a shared library" ON )
@@ -260,7 +260,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 add_subdirectory(src)
 #add_subdirectory(doc)
-#add_subdirectory(test)
+add_subdirectory(test)
 add_subdirectory(tools)
 
 set(DEST_DIR ${CMAKE_BINARY_DIR})

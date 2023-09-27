@@ -45,13 +45,19 @@ struct parse_reshape : op_parser<parse_reshape>
         if(info.mod->get_dynamic())
         {
             std::vector<int64_t> dims;
+            int is_const=0;
             if(args.size() == 2)
             {
                 auto s = args[1]->eval_for_shape();
                 s.visit([&](auto v) { copy(v, std::back_inserter(dims)); });
+
+                if(args[1]->name()=="@literal")
+                {
+                    is_const=1;
+                }
             }
 
-            return info.add_instruction(make_op("reshape_dynamic", {{"max_dims", dims}}),
+            return info.add_instruction(make_op("reshape_dynamic", {{"max_dims", dims},{"is_const",is_const}}),
                                         info.make_contiguous(args[0]),args[1]);
         }
         // 静态实现

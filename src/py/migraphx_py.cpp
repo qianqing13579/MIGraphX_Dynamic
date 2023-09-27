@@ -326,6 +326,10 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         .def("reshape",&migraphx::program::reshape,py::arg("inputs")=std::unordered_map<std::string, std::vector<std::size_t>>(),py::arg("printInfo")=true)
         .def("get_parameter_names", &migraphx::program::get_parameter_names)
         .def("get_parameter_shapes", &migraphx::program::get_parameter_shapes)
+        .def("get_inputs", &migraphx::program::get_inputs)
+        .def("get_outputs", &migraphx::program::get_outputs)
+        .def("get_memory_usage", &migraphx::program::get_memory_usage)
+        .def("get_offload_copy", &migraphx::program::get_offload_copy)
         .def("get_output_shapes", &migraphx::program::get_output_shapes)
         .def("is_compiled", &migraphx::program::is_compiled)
         .def(
@@ -348,7 +352,7 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
             [](migraphx::program& p, const std::string& name) { return p.create_module(name); },
             py::arg("name"))
         .def("run",
-             [](migraphx::program& p, py::dict params) {
+             [](migraphx::program& p, py::dict params,std::vector<std::string> output_names={}) {
                  migraphx::parameter_map pm;
                  for(auto x : params)
                  {
@@ -357,8 +361,10 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
                      py::buffer_info info = b.request();
                      pm[key]              = migraphx::argument(to_shape(info), info.ptr);
                  }
-                 return p.eval(pm);
-             })
+                 return p.eval(pm,output_names);
+             }, 
+             py::arg("params"),
+             py::arg("output_names")=std::vector<std::string>())
         .def("sort", &migraphx::program::sort)
         .def("print", [](const migraphx::program& p) { std::cout << p << std::endl; })
         .def("__eq__", std::equal_to<migraphx::program>{})

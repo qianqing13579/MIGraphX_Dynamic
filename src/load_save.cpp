@@ -28,6 +28,7 @@
 #include <migraphx/json.hpp>
 #include <migraphx/msgpack.hpp>
 #include <migraphx/file_buffer.hpp>
+#include <migraphx/ranges.hpp>
 #include <fstream>
 
 namespace migraphx {
@@ -36,6 +37,13 @@ inline namespace MIGRAPHX_INLINE_NS {
 program load(const std::string& filename, const file_options& options)
 {
     return load_buffer(read_buffer(filename), options);
+}
+int load_mxr_version(const std::string& filename, const file_options& options)
+{
+    std::vector<char> buffer=read_buffer(filename);
+    value v=from_msgpack(buffer.data(), buffer.size());
+    int mxr_version = v.at("version").to<int>();
+    return mxr_version;
 }
 program load_buffer(const std::vector<char>& buffer, const file_options& options)
 {
@@ -62,15 +70,18 @@ program load_buffer(const char* buffer, std::size_t size, const file_options& op
         MIGRAPHX_THROW("Unknown format: " + options.format);
     }
 
-    // 设置输入大小(在动态shape中使用)
+    // 设置输入大小(在动态shape中需要判断是否超过最大值)
     for(auto ins : iterator_for(*p.get_main_module()))
     {
-        // 默认第一个param为输入tensor
         if(ins->name() == "@param")
         {
             std::string param_name=any_cast<builtin::param>(ins->get_operator()).parameter;
-            p.get_main_module()->set_input_shape(param_name,ins->get_shape());
-            break;
+
+            // 处理offload==false的情况
+            if(!contains(param_name, "#output_"))
+            {
+                p.get_main_module()->set_input_shape(param_name,ins->get_shape());
+            }
         }
     }
     return p;

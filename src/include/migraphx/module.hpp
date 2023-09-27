@@ -224,9 +224,15 @@ struct module
     void set_input_shape(const std::string &name,const shape &input_shape);
     shape get_input_shape(const std::string &name) const;
     std::unordered_map<std::string,shape> get_input_shapes() const;
+    void set_output_shape(const std::string &name,const shape &output_shape);
+    shape get_output_shape(const std::string &name) const;
+    std::unordered_map<std::string,shape> output_shapes() const;
+    void set_output_name(const std::string &name);
+    std::vector<std::string> get_output_names() const;
+
 
     void set_dynamic(bool is_dynamic);
-    bool get_dynamic();
+    bool get_dynamic() const; 
 
     private:
     void assign(const module& m);

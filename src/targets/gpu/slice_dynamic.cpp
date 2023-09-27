@@ -120,34 +120,52 @@ argument hip_slice_dynamic::compute(context& ctx, const shape& output_shape, con
     {
         // 计算starts
         {
-            // shape tensor在FP16模式下还是float类型
-            std::vector<float> shape_data(args[1].get_shape().elements());
-
-            // 拷贝到gpu
-            hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
-            ctx.finish();
-            
-            starts.resize(args[1].get_shape().elements());
-            for(int i=0;i<shape_data.size();++i)
+            if(op.is_const_stars==0)
             {
-                starts[i]=static_cast<int64_t>(shape_data[i]);
+                // shape tensor在FP16模式下还是float类型
+                std::vector<float> shape_data(args[1].get_shape().elements());
+
+                // 拷贝到gpu
+                hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+                ctx.finish();
+                
+                starts.resize(args[1].get_shape().elements());
+                for(int i=0;i<shape_data.size();++i)
+                {
+                    starts[i]=static_cast<int64_t>(shape_data[i]);
+                }
+
             }
+            else
+            {
+                starts=op.starts;
+            }
+            
         }
 
         // 计算ends
         {
-            // shape tensor在FP16模式下还是float类型
-            std::vector<float> shape_data(args[2].get_shape().elements());
-
-            // 拷贝到gpu
-            hipMemcpyAsync(shape_data.data(), args[2].data(), args[2].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
-            ctx.finish();
-            
-            ends.resize(args[2].get_shape().elements());
-            for(int i=0;i<shape_data.size();++i)
+            if(op.is_const_ends==0)
             {
-                ends[i]=static_cast<int64_t>(shape_data[i]);
+                // shape tensor在FP16模式下还是float类型
+                std::vector<float> shape_data(args[2].get_shape().elements());
+
+                // 拷贝到gpu
+                hipMemcpyAsync(shape_data.data(), args[2].data(), args[2].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+                ctx.finish();
+                
+                ends.resize(args[2].get_shape().elements());
+                for(int i=0;i<shape_data.size();++i)
+                {
+                    ends[i]=static_cast<int64_t>(shape_data[i]);
+                }
+
             }
+            else
+            {
+                ends=op.ends;
+            }
+            
         }
 
         // 计算axes

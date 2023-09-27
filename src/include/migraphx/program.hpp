@@ -79,11 +79,20 @@ struct program
 
     std::unordered_map<std::string, shape> get_parameter_shapes();
 
-    std::vector<argument> eval(parameter_map params) const;
+    std::vector<argument> eval(parameter_map params,const std::vector<std::string> &output_names={}) const;
 
     std::size_t size() const;
 
     std::vector<shape> get_output_shapes() const;
+
+    // get input/output shape
+    std::unordered_map<std::string, shape> get_inputs() const;
+    std::unordered_map<std::string, shape> get_outputs() const;
+
+    // get memory usage(bytes)
+    std::size_t get_memory_usage() const;
+
+    int get_mxr_version() const;
 
     context& get_context() const;
 
@@ -149,6 +158,8 @@ struct program
     int reshape(const std::unordered_map<std::string, std::vector<std::size_t>> &inputs,bool printInfo=true);
 
     void set_device_id(std::size_t device_id = 0);
+
+    bool get_offload_copy() const;
 
     private:
     void assign(const program& p);

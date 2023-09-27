@@ -23,6 +23,7 @@
  */
 
 #include <migraphx/program.hpp>
+#include <migraphx/version.h>
 #include <migraphx/onnx.hpp>
 #include <migraphx/stringutils.hpp>
 #include <migraphx/instruction.hpp>
@@ -67,6 +68,7 @@ struct program_impl
     context ctx;
     std::string target_name;
     std::size_t device_id;
+    bool offload_copy=false;
 };
 
 program::program() : impl(std::make_unique<program_impl>()) { this->create_module("main"); }
@@ -160,6 +162,48 @@ std::vector<shape> program::get_output_shapes() const
     return mm->get_output_shapes();
 }
 
+std::unordered_map<std::string, shape> program::get_inputs() const
+{
+    const auto* mm = this->get_main_module();
+    return mm->get_input_shapes();
+
+}
+
+std::unordered_map<std::string, shape> program::get_outputs() const
+{
+    const auto* mm = this->get_main_module();
+    return mm->output_shapes();
+}
+
+std::size_t program::get_memory_usage() const
+{
+    auto* m = this->get_main_module();
+    std::size_t memory_usage=0;
+    for(auto ins : iterator_for(*m))
+    {
+        std::string ins_name=ins->name();
+        if(ins_name=="hip::hip_copy_literal"||
+          ins_name=="hip::hip_allocate_memory")
+        {
+            memory_usage+=(ins->get_shape().bytes());
+        }
+    }
+    return memory_usage;
+
+}
+
+int program::get_mxr_version() const
+{
+
+    /*
+    mxr file version is for the data structure or format of the MXR file. Version should be bumped
+    if any changes occur to the format of the MXR file.
+    */
+    const int mxr_version=7;
+    
+    return mxr_version;
+}
+
 context& program::get_context() const { return impl->ctx; }
 
 instruction_ref program::validate() const
@@ -219,6 +263,7 @@ void program::compile(const target& t, compile_options options)
     this->impl->device_id=options.device_id;
     this->impl->target_name = t.name();
     this->impl->ctx         = t.get_context(this->impl->device_id);
+    this->impl->offload_copy = options.offload_copy;
     options.is_dynamic=this->get_main_module()->get_dynamic();
     if(enabled(MIGRAPHX_TRACE_COMPILE{}))
         options.trace = tracer{std::cout};
@@ -401,6 +446,8 @@ static void Reshape(const module* mod,
 
 }
 
+// #define DYNAMIC_SHAPE_DEBUG
+
 template <class F>
 std::vector<argument> generic_eval_dynamic(const module* mod,
                                    context& ctx,
@@ -414,6 +461,37 @@ std::vector<argument> generic_eval_dynamic(const module* mod,
     values.reserve(16);
     auto trace = make_trace(mod);
 
+    // 处理offload_copy为false的params
+    std::vector<std::string> model_output_names=mod->get_output_names();
+    std::unordered_map<std::string, argument> new_params;
+    // 先处理output_name
+    for(auto iter=params.begin();iter!=params.end();++iter)
+    {
+        std::string name=iter->first;
+        for(int i=0;i<model_output_names.size();++i)
+        {
+            if(name==model_output_names[i])
+            {
+                std::string new_name="main:#output_"+std::to_string(i);
+                new_params[new_name]=iter->second;
+                break;
+            }
+
+        }
+    }
+    if(new_params.empty())
+    {
+        new_params=params;
+    }
+    else
+    {
+        // 保存输入
+        for(auto i:mod->get_input_shapes())
+        {
+            new_params[i.first]=params[i.first];
+        }
+    }
+
     // 获取输入大小
     std::unordered_map<std::string, std::vector<std::size_t>> inputs = {};
     for(auto input_map:params)
@@ -425,6 +503,11 @@ std::vector<argument> generic_eval_dynamic(const module* mod,
         assert(results.find(ins) == results.end());
         const auto& name = ins->name();
 
+#ifdef DYNAMIC_SHAPE_DEBUG
+        // 打印动态模式出错指令
+        static int index=0;
+        printf("=======%d: %s=========\n",index++,name.c_str());
+#endif
         // 指令执行前需要reshape，这里处理数据无依赖型算子，因为这些算子的输出shape只与输入tensor的shape有关，比如卷积算子
         Reshape(mod,ins,inputs,results,ctx);
 
@@ -437,9 +520,9 @@ std::vector<argument> generic_eval_dynamic(const module* mod,
             results.emplace(
                 ins, trace(ins, [&] {
                     auto param_name = any_cast<builtin::param>(ins->get_operator()).parameter;
-                    if(not contains(params, param_name))
+                    if(not contains(new_params, param_name))
                         MIGRAPHX_THROW("Parameter not found: " + param_name);
-                    auto param = params[param_name];
+                    auto param = new_params[param_name];
                     return param;
                 }));
         }
@@ -473,7 +556,7 @@ std::vector<argument> generic_eval_dynamic(const module* mod,
             auto module_eval     = [&](module_ref smod,
                                    const std::unordered_map<std::string, argument>& inputs) {
                 auto ssctx = ctx;
-                return generic_eval(smod, ssctx, inputs, results, make_trace);
+                return generic_eval_dynamic(smod, ssctx, inputs, results, make_trace);
             };
 
             results.emplace(ins, trace(ins, [&] {
@@ -490,10 +573,16 @@ std::vector<argument> generic_eval_dynamic(const module* mod,
                 ins->name()=="gpu::multibroadcast_dynamic"||
                 ins->name()=="gpu::pad_dynamic"||
                 ins->name()=="gpu::range"||
-                ins->name()=="gpu::resize")
+                ins->name()=="gpu::resize"||
+                ins->name()=="gpu::tile")
         {
             ins->set_output_shape(results[ins].get_shape());
         }
+
+#ifdef DYNAMIC_SHAPE_DEBUG
+        // 动态shape调试
+        ins->debug_print();
+#endif
 
         assert(results.find(ins) != results.end());
         if(not ins->get_shape().dynamic())
@@ -516,6 +605,38 @@ std::vector<argument> generic_eval(const module* mod,
     std::vector<argument> values;
     values.reserve(16);
     auto trace = make_trace(mod);
+
+    // 处理offload_copy为false的params
+    std::vector<std::string> model_output_names=mod->get_output_names();
+    std::unordered_map<std::string, argument> new_params;
+    // 先处理output_name
+    for(auto iter=params.begin();iter!=params.end();++iter)
+    {
+        std::string name=iter->first;
+        for(int i=0;i<model_output_names.size();++i)
+        {
+            if(name==model_output_names[i])
+            {
+                std::string new_name="main:#output_"+std::to_string(i);
+                new_params[new_name]=iter->second;
+                break;
+            }
+
+        }
+    }
+    if(new_params.empty())
+    {
+        new_params=params;
+    }
+    else
+    {
+        // 保存输入
+        for(auto i:mod->get_input_shapes())
+        {
+            new_params[i.first]=params[i.first];
+        }
+    }
+    
     for(auto ins : iterator_for(*mod))
     {
         assert(results.find(ins) == results.end());
@@ -530,9 +651,9 @@ std::vector<argument> generic_eval(const module* mod,
             results.emplace(
                 ins, trace(ins, [&] {
                     auto param_name = any_cast<builtin::param>(ins->get_operator()).parameter;
-                    if(not contains(params, param_name))
+                    if(not contains(new_params, param_name))
                         MIGRAPHX_THROW("Parameter not found: " + param_name);
-                    auto param = params[param_name];
+                    auto param = new_params[param_name];
                     // TODO: may want to check correct number of dimensions and/or was within bounds
                     if(param.get_shape() != ins->get_shape())
                     {
@@ -607,7 +728,7 @@ std::vector<argument> generic_eval(const program& p,
     
 }
 
-std::vector<argument> program::eval(parameter_map params) const
+std::vector<argument> program::eval(parameter_map params,const std::vector<std::string> &output_names) const
 {
     auto& ctx = this->impl->ctx;
 #ifndef NDEBUG
@@ -633,6 +754,7 @@ std::vector<argument> program::eval(parameter_map params) const
 
     auto trace_level = value_of(MIGRAPHX_TRACE_EVAL{});
 
+    std::vector<argument> results;
     if(trace_level > 0)
     {
         std::unordered_map<instruction_ref, std::string> ins_out;
@@ -643,7 +765,7 @@ std::vector<argument> program::eval(parameter_map params) const
             ins_out[x] = ss.str();
         });
 
-        return generic_eval(*this,
+        results = generic_eval(*this,
                             ctx,
                             std::move(params),
                             with_check_context([&](auto& ins, auto f, auto&& check_context) {
@@ -696,22 +818,69 @@ std::vector<argument> program::eval(parameter_map params) const
     }
     else
     {
-        return generic_eval(*this,
+        results =  generic_eval(*this,
                             ctx,
                             std::move(params),
                             with_check_context([&](auto&, auto f, auto&& check_context) {
                                 return check_context(f);
                             }));
     }
+
+    // 按照输出节点输出
+    if(output_names.size()==0)
+    {
+        return results;
+    }
+    else
+    {
+        // 先获取模型输出名
+        std::vector<std::string> model_output_names=this->get_main_module()->get_output_names();
+        std::vector<int> index;
+        for(int i=0;i<output_names.size();++i)
+        {
+            int j=0;
+            for(j=0;j<model_output_names.size();++j)
+            {
+                if(model_output_names[j]==output_names[i])
+                {
+                    index.push_back(j);
+                    break;
+                }
+            }
+            if(j==model_output_names.size())
+            {
+                // 没找到
+                printf("%s not found! Program will get all outputs.",output_names[i].c_str());
+                return results;
+            }
+        }
+
+        // 返回指定输出
+        std::vector<argument> results2;
+        for(int i=0;i<index.size();++i)
+        {
+            results2.push_back(results[index[i]]);
+        }
+        return results2;
+
+    }
 }
 
-const int program_file_version = 5;
+static std::string get_migraphx_version()
+{
+    std::stringstream ss;
+    ss << std::to_string(MIGRAPHX_VERSION_MAJOR) << "." << std::to_string(MIGRAPHX_VERSION_MINOR)
+       << "." << std::to_string(MIGRAPHX_VERSION_PATCH);
+    return ss.str();
+}
 
 value program::to_value() const
 {
     value result;
-    result["version"] = program_file_version;
+    result["version"] = get_mxr_version();
+    result["migraphx_version"] = get_migraphx_version();
     result["target"]  = this->impl->target_name;
+    result["offload_copy"]  = this->impl->offload_copy;
     if(not this->impl->target_name.empty())
         result["context"] = this->impl->ctx.to_value();
 
@@ -722,6 +891,32 @@ value program::to_value() const
         value mod_val;
         value nodes;
         mod_val["name"] = mod->name();
+        mod_val["dynamic"]=mod->get_dynamic();
+
+        // 保存输入输出信息，由于每个module都有输入输出，所以每个module都需要保存
+        std::vector<std::string> input_names;
+        std::vector<value> input_shapes;
+        for(auto i:mod->get_input_shapes())
+        {
+            input_names.push_back(i.first);
+            value shape_value;
+            migraphx_to_value(shape_value,i.second);
+            input_shapes.push_back(shape_value);
+        }
+        mod_val["input_names"]   = input_names;
+        mod_val["input_shapes"]   = input_shapes;
+
+        std::vector<std::string> output_names=mod->get_output_names();
+        std::vector<value> output_shapes;
+        for(auto i:output_names)
+        {
+            value shape_value;
+            migraphx_to_value(shape_value,mod->output_shapes()[i]);
+            output_shapes.push_back(shape_value);
+        }
+        mod_val["output_names"]   = output_names;
+        mod_val["output_shapes"]   = output_shapes;
+
         names           = mod->print(
             [&](auto ins, auto ins_names) {
                 value node;
@@ -771,6 +966,46 @@ static void mod_from_val(module_ref mod,
                          const std::unordered_map<std::string, module_ref>& map_mods)
 {
     const auto& module_val = v.at(mod->name());
+    bool dynamic = module_val.at("dynamic").to<bool>();
+    mod->set_dynamic(dynamic);
+    
+    // 设置输入输出信息
+    std::vector<std::string> input_names;
+    std::vector<shape> input_shapes;
+    for(auto i:module_val.at("input_names"))
+    {
+        input_names.push_back(i.to<std::string>());
+    }
+    for(auto i:module_val.at("input_shapes"))
+    {
+        shape s;
+        migraphx_from_value(i, s);
+        input_shapes.push_back(s);
+    }
+    for(int i=0;i<input_names.size();++i)
+    {
+        mod->set_input_shape(input_names[i],input_shapes[i]);
+    }
+
+    std::vector<std::string> output_names;
+    std::vector<shape> output_shapes;
+    for(auto i:module_val.at("output_names"))
+    {
+        output_names.push_back(i.to<std::string>());
+    }
+    for(auto i:module_val.at("output_shapes"))
+    {
+        shape s;
+        migraphx_from_value(i, s);
+        output_shapes.push_back(s);
+    }
+    for(int i=0;i<output_names.size();++i)
+    {
+        mod->set_output_shape(output_names[i],output_shapes[i]);
+        mod->set_output_name(output_names[i]);
+    }
+    
+
     for(const value& node : module_val.at("nodes"))
     {
         instruction_ref output;
@@ -836,10 +1071,22 @@ static void mod_from_val(module_ref mod,
 
 void program::from_value(const value& v)
 {
-    auto version = v.at("version").to<int>();
-    if(version != program_file_version)
+    auto mxr_version = v.at("version").to<int>();
+    if(mxr_version != get_mxr_version())
     {
-        MIGRAPHX_THROW("Warning: Program version mismatch");
+        MIGRAPHX_THROW(
+            "Error: MXR version mismatch. MXR file was created using MXR version: " +
+            std::to_string(mxr_version) + ", while installed MIGraphX is using MXR version: " +
+            std::to_string(get_mxr_version()) +
+            ", Try regenerating MXR file using installed MIGraphX and running again.");
+    }
+
+    auto migx_version = v.at("migraphx_version").to<std::string>();
+    if(migx_version != get_migraphx_version())
+    {
+        std::cout << "warning: MXR File was created using MIGraphX version: " << migx_version
+                  << ", while installed MIGraphX is at version: " << get_migraphx_version()
+                  << ", operators implementation could be mismatched."<<std::endl;
     }
 
     this->impl->target_name = v.at("target").to<std::string>();
@@ -849,6 +1096,8 @@ void program::from_value(const value& v)
         this->impl->ctx = t.get_context(this->impl->device_id);
         this->impl->ctx.from_value(v.at("context"));
     }
+
+    this->impl->offload_copy = v.at("offload_copy").to<bool>();
 
     auto module_vals = v.at("modules");
     for(const auto& vv : module_vals)
@@ -1257,6 +1506,11 @@ int program::reshape(const std::unordered_map<std::string, std::vector<std::size
 void program::set_device_id(std::size_t device_id)
 {
     this->impl->device_id=device_id;
+}
+
+bool program::get_offload_copy() const
+{
+    return this->impl->offload_copy;
 }
 
 bool operator==(const program& x, const program& y) { return to_string(x) == to_string(y); }

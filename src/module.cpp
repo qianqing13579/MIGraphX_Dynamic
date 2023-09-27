@@ -57,6 +57,8 @@ struct module_impl
     uint32_t nparams = 0;
     bool bypass      = false;
     std::unordered_map<std::string, shape> input_shape_map;
+    std::unordered_map<std::string, shape> output_shape_map;
+    std::vector<std::string> output_names;
     bool is_dynamic=false;
 
     bool contains(instruction_ref ins) const
@@ -983,7 +985,7 @@ void module::set_dynamic(bool is_dynamic)
     impl->is_dynamic=is_dynamic;
     
 }
-bool module::get_dynamic()
+bool module::get_dynamic() const
 {
     return impl->is_dynamic;
 }
@@ -995,6 +997,30 @@ shape module::get_input_shape(const std::string &name) const
 std::unordered_map<std::string,shape> module::get_input_shapes() const
 {
     return impl->input_shape_map;
+}
+
+void module::set_output_shape(const std::string &name,const shape &output_shape)
+{
+    impl->output_shape_map[name]=output_shape;
+}
+shape module::get_output_shape(const std::string &name) const
+{
+    return impl->output_shape_map[name];
+}
+std::unordered_map<std::string,shape> module::output_shapes() const
+{
+    return impl->output_shape_map;
+}
+
+void module::set_output_name(const std::string &name)
+{
+    impl->output_names.push_back(name);
+
+}
+
+std::vector<std::string> module::get_output_names() const
+{
+    return impl->output_names;
 }
 
 bool operator==(const module& x, const module& y) { return to_string(x) == to_string(y); }

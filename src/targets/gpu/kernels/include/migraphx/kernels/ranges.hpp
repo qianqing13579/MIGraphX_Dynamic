@@ -21,27 +21,29 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef MIGRAPHX_GUARD_KERNELS_RANGES_HPP
+#define MIGRAPHX_GUARD_KERNELS_RANGES_HPP
 
-#include "verify_program.hpp"
-#include <migraphx/program.hpp>
-#include <migraphx/generate.hpp>
-#include <migraphx/make_op.hpp>
+#include <migraphx/kernels/iota_iterator.hpp>
 
-struct test_gather : verify_program<test_gather>
+namespace migraphx {
+
+template <class Iterator>
+struct iterator_range
 {
-    migraphx::program create_program() const
-    {
-        migraphx::program p;
-        auto* mm = p.get_main_module();
-        migraphx::shape s{migraphx::shape::float_type, {3, 3}};
-        migraphx::shape s_indices{migraphx::shape::int32_type, {2, 2}};
-        std::vector<int> indices{1, 2, 2, 1};
-        auto a0  = mm->add_parameter("data", s);
-        auto a1  = mm->add_literal(migraphx::literal{s_indices, indices});
-        int axis = 0;
-        auto r = mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
-        mm->add_return({r});
-        
-        return p;
-    }
+    Iterator start;
+    Iterator last;
+
+    constexpr Iterator begin() const { return start; }
+
+    constexpr Iterator end() const { return last; }
 };
+
+constexpr iterator_range<iota_iterator> range(diff_int start, diff_int last)
+{
+    return {{start, {}}, {last, {}}};
+}
+constexpr iterator_range<iota_iterator> range(diff_int last) { return range(0, last); }
+
+} // namespace migraphx
+#endif // MIGRAPHX_GUARD_KERNELS_RANGES_HPP

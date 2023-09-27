@@ -21,27 +21,52 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef MIGRAPHX_GUARD_OPERATORS_TILE_HPP
+#define MIGRAPHX_GUARD_OPERATORS_TILE_HPP
 
-#include "verify_program.hpp"
-#include <migraphx/program.hpp>
-#include <migraphx/generate.hpp>
-#include <migraphx/make_op.hpp>
+#include <migraphx/shape_for_each.hpp>
+#include <migraphx/check_shapes.hpp>
+#include <migraphx/config.hpp>
+#include <migraphx/float_equal.hpp>
+#include <migraphx/par_for.hpp>
+#include <migraphx/argument.hpp>
+#include <cmath>
+#include <utility>
 
-struct test_gather : verify_program<test_gather>
+namespace migraphx {
+inline namespace MIGRAPHX_INLINE_NS {
+namespace op {
+
+struct tile
 {
-    migraphx::program create_program() const
+    std::vector<int64_t> repeats;
+
+    template <class Self, class F>
+    static auto reflect(Self& self, F f)
     {
-        migraphx::program p;
-        auto* mm = p.get_main_module();
-        migraphx::shape s{migraphx::shape::float_type, {3, 3}};
-        migraphx::shape s_indices{migraphx::shape::int32_type, {2, 2}};
-        std::vector<int> indices{1, 2, 2, 1};
-        auto a0  = mm->add_parameter("data", s);
-        auto a1  = mm->add_literal(migraphx::literal{s_indices, indices});
-        int axis = 0;
-        auto r = mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
-        mm->add_return({r});
-        
-        return p;
+        return pack(f(self.repeats, "max_repeats"));
     }
+
+    std::string name() const { return "tile"; }
+    
+    shape compute_shape(std::vector<shape> inputs) const
+    {
+        check_shapes{inputs, *this}.has(2).standard();
+        auto output_dims = inputs[0].lens();
+        auto type = inputs[0].type();
+        auto rank = output_dims.size();
+        for(int axis = 0; axis < rank; axis++)
+        {
+            output_dims[axis] *= repeats[axis];
+        }
+            
+        return {type, output_dims};
+    }
+
 };
+
+} // namespace op
+} // namespace MIGRAPHX_INLINE_NS
+} // namespace migraphx
+
+#endif

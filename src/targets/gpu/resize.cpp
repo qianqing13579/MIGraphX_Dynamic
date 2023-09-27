@@ -16,14 +16,14 @@ argument hip_resize::compute(context& ctx,const shape& output_shape,const std::v
 {
     std::vector<float> scales=op.scales;
     int mode=op.mode;
-    int align_corners=op.align_corners;
+    std::string coordinate_transformation_mode=op.coordinate_transformation_mode;
 
     // 不包含size参数
     if(scales.size()>0)
     {
         argument result=args[args.size()-1].reshape(this->compute_shape({args[0].get_shape()}));
 
-        device::upsample(ctx.get_stream().get(), result, args[0],scales,mode,align_corners);
+        device::upsample(ctx.get_stream().get(), result, args[0],scales,mode,coordinate_transformation_mode);
 
         return result;
 
@@ -59,7 +59,7 @@ argument hip_resize::compute(context& ctx,const shape& output_shape,const std::v
 
         argument result=args[args.size()-1].reshape(shape{args[0].get_shape().type(),shape_data2});
 
-        device::upsample(ctx.get_stream().get(), result, args[0],scales,mode,align_corners);
+        device::upsample(ctx.get_stream().get(), result, args[0],scales,mode,coordinate_transformation_mode);
 
         return result;
 

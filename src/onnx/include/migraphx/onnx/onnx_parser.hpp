@@ -101,7 +101,7 @@ struct onnx_parser
     bool use_dyn_output         = false;
     bool skip_unknown_operators = false;
     int64_t max_loop_iterations = 10;
-    int64_t opset_version       = 13;
+    int64_t opset_version       = 13; // 建议导出ONNX的时候opset>=13
 
     std::unordered_map<std::string, op_func> ops;
 

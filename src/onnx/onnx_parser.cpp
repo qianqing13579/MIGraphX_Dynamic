@@ -207,8 +207,11 @@ void onnx_parser::parse_from(std::istream& is, std::string name)
     onnx::ModelProto model;
     if(model.ParseFromIstream(&is))
     {
-        auto version  = get_opset_version(model);
-        opset_version = (version == -1) ? opset_version : version;
+        if(get_opset_version(model)<opset_version)
+        {
+            printf("warning: ONNX model was created using opset %d,"
+        "while suggested version is not less than %d,operators implementation could be mismatched.\n",get_opset_version(model),opset_version);
+        }
 
         if(model.has_graph())
         {
@@ -358,12 +361,20 @@ void onnx_parser::parse_graph(module* mod, const onnx::GraphProto& graph)
         all_output_names.end(),
         std::back_inserter(prog_output_names),
         [&](const auto& name) { return not(name.empty() or instructions.count(name) == 0); });
-
+    
     std::vector<instruction_ref> output_ins;
     std::transform(prog_output_names.begin(),
                    prog_output_names.end(),
                    std::back_inserter(output_ins),
                    [&](const auto& name) { return instructions[name]; });
+
+    // 设置输出shape
+    for(int i=0;i<prog_output_names.size();++i)
+    {
+        shape s=instructions[prog_output_names[i]]->get_shape();
+        mod->set_output_shape(prog_output_names[i],{s.type(),s.lens()});
+        mod->set_output_name(prog_output_names[i]);
+    }
 
     // add the return instuction
     mod->add_return(output_ins);

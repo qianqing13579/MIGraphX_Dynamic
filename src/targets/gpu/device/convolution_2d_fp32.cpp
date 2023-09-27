@@ -2,6 +2,8 @@
 
 #include <migraphx/gpu/device/convolution_2d_fp32.hpp>
 #include <migraphx/gpu/device/nary.hpp>
+#include <migraphx/SimpleLog.h>
+#include <migraphx/gpu/gemm_impl.hpp>
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
@@ -809,6 +811,193 @@ void convolution_2d_fp32(hipStream_t stream,
                                             remdinergroupX,
                                             remdinergroupY);
 }
+
+//////////////////////////// im2col ///////////////////////////////
+shape compute_col_shape(const shape &input,const shape &weights,
+                            const std::vector<std::size_t> padding,
+                            const std::vector<std::size_t> stride,
+                            const std::vector<std::size_t> dilation)
+{
+    // 先计算col图像的shape
+    auto input_channels = input.lens()[1];
+    auto kernel_height  = weights.lens()[2];
+    auto kernel_width   = weights.lens()[3];
+
+    auto padding_h = 2 * padding[0];
+    auto padding_w = 2 * padding[1];
+    auto output_height = (input.lens()[2] - (1 + dilation[0] * (kernel_height - 1)) + padding_h) / stride[0] + 1;
+    auto output_width  = (input.lens()[3] - (1 + dilation[1] * (kernel_width - 1)) + padding_w) / stride[1] + 1;
+
+    auto channels_col = kernel_height * kernel_width * input_channels;
+    
+    // col图像的行：channels_col，列：output_height * output_width
+    return {input.type(), {channels_col,output_height * output_width}};
+}
+
+template <typename Dtype>
+__global__ void im2col_gpu_kernel(const int n, const Dtype* data_im,
+    const int height, const int width, const int kernel_h, const int kernel_w,
+    const int pad_h, const int pad_w,
+    const int stride_h, const int stride_w,
+    const int dilation_h, const int dilation_w,
+    const int height_col, const int width_col,
+    Dtype* data_col) 
+{
+    // grid stride looping
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x;index < n;index += blockDim.x * gridDim.x)
+    {
+        // 每个线程的多维索引，这里计算的是在输出tensor中的索引
+        const int w_col = index % width_col; // w坐标
+        const int h_index = index / width_col;
+        const int h_col = h_index % height_col; // h坐标，这里的索引是按照填充之后的图来计算的
+        const int c_im = h_index / height_col; // c坐标
+
+        // 每个线程对应的滑动窗口在原图中的索引
+        const int h_offset = h_col * stride_h - pad_h; // 注意，由于有padding的存在，所以索引需要减去padding
+        const int w_offset = w_col * stride_w - pad_w;
+
+        // 该线程对应的输入tensor的数据指针
+        const Dtype* data_im_ptr = data_im;
+        data_im_ptr += (c_im * height + h_offset) * width + w_offset; // 要拷贝的原图像起始位置
+
+        // 该线程对应的输出tensor的数据指针
+        const int c_col = c_im * kernel_h * kernel_w;// 因为是按照每个通道展开，所以这里需要乘以kernel_h * kernel_w
+        Dtype* data_col_ptr = data_col;
+        data_col_ptr += (c_col * height_col + h_col) * width_col + w_col;
+        for (int i = 0; i < kernel_h; ++i) 
+        {
+            for (int j = 0; j < kernel_w; ++j) 
+            {
+                int h_im = h_offset + i * dilation_h;
+                int w_im = w_offset + j * dilation_w;
+                *data_col_ptr =
+                    (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
+                    data_im_ptr[i * dilation_h * width + j * dilation_w] : 0;
+                data_col_ptr += height_col * width_col;// 步长为height_col * width_col，即每个滑动窗口展开为一列
+            }
+        }
+    }
+}
+
+template <typename Dtype>
+void im2col_gpu(hipStream_t stream,const Dtype* data_im, const int channels,
+    const int height, const int width, const int kernel_h, const int kernel_w,
+    const int pad_h, const int pad_w,
+    const int stride_h, const int stride_w,
+    const int dilation_h, const int dilation_w,
+    Dtype* data_col) 
+{
+  int height_col = (height + 2 * pad_h -(dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
+  int width_col = (width + 2 * pad_w -(dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  
+  // 启动 channels * height_col * width_col 个线程
+  int num_kernels = channels * height_col * width_col;
+  int number_threads_per_block=256;
+  dim3 threads(number_threads_per_block);
+  dim3 blocks((num_kernels + number_threads_per_block - 1) / number_threads_per_block);
+  im2col_gpu_kernel<Dtype><<<blocks,threads,0,stream>>>(
+      num_kernels, data_im, height, width, kernel_h, kernel_w, pad_h,
+      pad_w, stride_h, stride_w, dilation_h, dilation_w, height_col,
+      width_col, data_col);
+}
+
+
+void convolution_2d_im2col(context& ctx, 
+                const argument& result, 
+                const argument& x,
+                const argument& w,
+                const argument& col_buf,
+                const std::vector<std::size_t> padding,
+                const std::vector<std::size_t> stride,
+                const std::vector<std::size_t> dilation,
+                const int group)
+{
+    // 对col图像进行reshape
+    argument col_buffer=col_buf.reshape(compute_col_shape(x.get_shape(),w.get_shape(),padding,stride,dilation));
+
+    int batch_size=x.get_shape().lens()[0];
+    int number_of_one_batch_input=x.get_shape().lens()[1]*x.get_shape().lens()[2]*x.get_shape().lens()[3];
+    int number_of_one_batch_output=result.get_shape().lens()[1]*result.get_shape().lens()[2]*result.get_shape().lens()[3];
+
+    if(x.get_shape().type()==shape::float_type)
+    {
+        for(int i=0;i<batch_size;++i)
+        {
+            // 每次只处理batch=1的数据,防止内存溢出
+            im2col_gpu(ctx.get_stream().get(),
+                    (float *)x.data()+i*number_of_one_batch_input,
+                    /*const int channels*/x.get_shape().lens()[1],
+                    /*const int height*/x.get_shape().lens()[2],
+                    /*const int width*/x.get_shape().lens()[3],
+                    /*const int kernel_h*/w.get_shape().lens()[2], 
+                    /*const int kernel_w*/w.get_shape().lens()[3],
+                    /*const int pad_h*/padding[0], 
+                    /*const int pad_w*/padding[1],
+                    /*const int stride_h*/stride[0], 
+                    /*const int stride_w*/stride[1],
+                    /*const int dilation_h*/dilation[0], 
+                    /*const int dilation_w*/dilation[1],
+                    (float *)col_buffer.data());
+            
+            float alpha=1.0;
+            float beta=0.0;
+
+            // 计算一个batch的卷积
+            argument A=w.reshape(shape{w.get_shape().type(),{w.get_shape().lens()[0],w.get_shape().lens()[1]*w.get_shape().lens()[2]*w.get_shape().lens()[3]}});
+            argument B=col_buffer;
+            argument C=argument{shape{A.get_shape().type(),{A.get_shape().lens()[0],B.get_shape().lens()[1]}},(float*)result.data()+i*number_of_one_batch_output};
+            for(int g=0;g<group;++g)
+            {
+                argument A1=argument{shape{A.get_shape().type(),{A.get_shape().lens()[0]/group,A.get_shape().lens()[1]}},(float*)A.data()+g*A.get_shape().lens()[1]};
+                argument B1=argument{shape{B.get_shape().type(),{B.get_shape().lens()[0]/group,B.get_shape().lens()[1]}},(float*)B.data()+g*B.get_shape().lens()[1]*B.get_shape().lens()[0]/group};
+                argument C1=argument{shape{C.get_shape().type(),{C.get_shape().lens()[0]/group,C.get_shape().lens()[1]}},(float*)C.data()+g*C.get_shape().lens()[1]};
+                gemm(ctx, C1.get_shape(), {A1,B1,C1}, alpha, beta, true, false);
+            }
+        }
+    }
+    else if(x.get_shape().type()==shape::half_type)
+    {
+        for(int i=0;i<batch_size;++i)
+        {
+            // 每次只处理batch=1的数据,防止内存溢出
+            im2col_gpu(ctx.get_stream().get(),
+                    (_Float16 *)x.data()+i*number_of_one_batch_input,
+                    /*const int channels*/x.get_shape().lens()[1],
+                    /*const int height*/x.get_shape().lens()[2],
+                    /*const int width*/x.get_shape().lens()[3],
+                    /*const int kernel_h*/w.get_shape().lens()[2], 
+                    /*const int kernel_w*/w.get_shape().lens()[3],
+                    /*const int pad_h*/padding[0], 
+                    /*const int pad_w*/padding[1],
+                    /*const int stride_h*/stride[0], 
+                    /*const int stride_w*/stride[1],
+                    /*const int dilation_h*/dilation[0], 
+                    /*const int dilation_w*/dilation[1],
+                    (_Float16 *)col_buffer.data());
+            
+            float alpha=1.0;
+            float beta=0.0;
+
+            // 计算一个batch的卷积
+            argument A=w.reshape(shape{w.get_shape().type(),{w.get_shape().lens()[0],w.get_shape().lens()[1]*w.get_shape().lens()[2]*w.get_shape().lens()[3]}});
+            argument B=col_buffer;
+            argument C=argument{shape{A.get_shape().type(),{A.get_shape().lens()[0],B.get_shape().lens()[1]}},(_Float16*)result.data()+i*number_of_one_batch_output};
+            for(int g=0;g<group;++g)
+            {
+                argument A1=argument{shape{A.get_shape().type(),{A.get_shape().lens()[0]/group,A.get_shape().lens()[1]}},(_Float16*)A.data()+g*A.get_shape().lens()[1]};
+                argument B1=argument{shape{B.get_shape().type(),{B.get_shape().lens()[0]/group,B.get_shape().lens()[1]}},(_Float16*)B.data()+g*B.get_shape().lens()[1]*B.get_shape().lens()[0]/group};
+                argument C1=argument{shape{C.get_shape().type(),{C.get_shape().lens()[0]/group,C.get_shape().lens()[1]}},(_Float16*)C.data()+g*C.get_shape().lens()[1]};
+                gemm(ctx, C1.get_shape(), {A1,B1,C1}, alpha, beta, true, false);
+            }
+
+        }
+
+    }
+    
+
+
+}
+
 
 } // namespace device
 } // namespace gpu

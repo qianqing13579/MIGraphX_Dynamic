@@ -26,11 +26,14 @@
 #include <migraphx/generate.hpp>
 #include <migraphx/gpu/device/convolution_2d_fp32.hpp>
 #include <migraphx/gpu/device/convolution_2d_fp16.hpp>
+#include <migraphx/env.hpp>
 
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
 namespace gpu {
+
+MIGRAPHX_DECLARE_ENV_VAR(MIGRAPHX_USE_MIOPEN_CONV_IN_DYNAMIC_SHAPE)
 
 shape miopen_convolution_dynamic::compute_shape(const std::vector<shape>& inputs) const
 {
@@ -59,49 +62,12 @@ argument miopen_convolution_dynamic::compute(context& ctx,
                                      const std::vector<argument>& args) const
 {
     shape kernel_shape=args[1].get_shape();
+    bool is_conv_2d=(kernel_shape.lens().size()==4&&op.padding.size()==4&&op.padding[0]==op.padding[2]&&op.padding[1]==op.padding[3]);
     
-    bool is_conv_1d=(kernel_shape.lens().size()==3&&op.padding.size()==2&&op.padding[0]==op.padding[1]&&op.padding[0]==0); // 如果是1维卷积且pad是对称的
-    bool is_conv_2d=(kernel_shape.lens().size()==4&&op.padding.size()==4&&op.padding[0]==op.padding[2]&&op.padding[1]==op.padding[3]&&op.padding[0]==0&&op.padding[1]==0);
-    
-    
-    // is_conv_1d或者is_conv_2d的FP32情况下使用igemm的实现，可以解决启动性能问题
-    if(kernel_shape.type()==shape::float_type&&(is_conv_1d||is_conv_2d))
+    // conv_2d下使用im2col的实现，可以解决启动性能问题
+    if(is_conv_2d && !enabled(MIGRAPHX_USE_MIOPEN_CONV_IN_DYNAMIC_SHAPE{}))
     {
-        if(is_conv_1d)
-        {
-            std::vector<std::size_t> new_padding(4,0);
-            new_padding[0]=op.padding[0];
-            new_padding[2]=op.padding[1];
-
-            std::vector<std::size_t> new_stride(2,1);
-            new_stride[1]=op.stride[0];
-
-            std::vector<std::size_t> new_dilation(2,1);
-            new_dilation[1]=op.dilation[0];
-
-            std::vector<std::size_t> new_x_lens(4,1);
-            new_x_lens[0]=args[0].get_shape().lens()[0];
-            new_x_lens[1]=args[0].get_shape().lens()[1];
-            new_x_lens[3]=args[0].get_shape().lens()[2];
-
-            std::vector<std::size_t> new_w_lens(4,1);
-            new_w_lens[0]=args[1].get_shape().lens()[0];
-            new_w_lens[1]=args[1].get_shape().lens()[1];
-            new_w_lens[3]=args[1].get_shape().lens()[2];
-
-            // 使用2维计算
-            device::convolution_2d_fp32(ctx.get_stream().get(), 
-                                    args[3], 
-                                    args[0].reshape(shape{args[0].get_shape().type(),new_x_lens}),
-                                    args[1].reshape(shape{args[1].get_shape().type(),new_w_lens}),
-                                    new_padding,new_stride,new_dilation,op.group);
-        }
-        else if(is_conv_2d)
-        {
-            // fp32
-            device::convolution_2d_fp32(ctx.get_stream().get(), args[3], args[0],args[1],op.padding,op.stride,op.dilation,op.group);
-        }
-
+        device::convolution_2d_im2col(ctx, args[3], args[0],args[1],col_buffer,op.padding,op.stride,op.dilation,op.group);
     }
     // 其他情况使用MIOpen
     else
@@ -129,6 +95,7 @@ argument miopen_convolution_dynamic::compute(context& ctx,
         if(status != miopenStatusSuccess)
             MIGRAPHX_THROW("MIOpen Convolution: running convolution failed");
     }
+
     return args[3];
 }
 
@@ -193,12 +160,15 @@ void miopen_convolution_dynamic::finalize(context& ctx,
                                   std::vector<shape> inputs)
 {
     shape kernel_shape=inputs[1];
-
-    bool is_conv_1d=(kernel_shape.lens().size()==3&&op.padding.size()==2&&op.padding[0]==op.padding[1]&&op.padding[0]==0); // 如果是1维卷积且pad是对称的
-    bool is_conv_2d=(kernel_shape.lens().size()==4&&op.padding.size()==4&&op.padding[0]==op.padding[2]&&op.padding[1]==op.padding[3]&&op.padding[0]==0&&op.padding[1]==0);
+    bool is_conv_2d=(kernel_shape.lens().size()==4&&op.padding.size()==4&&op.padding[0]==op.padding[2]&&op.padding[1]==op.padding[3]);
     
-    if(kernel_shape.type()==shape::float_type&&(is_conv_1d||is_conv_2d))
+    if(is_conv_2d && !enabled(MIGRAPHX_USE_MIOPEN_CONV_IN_DYNAMIC_SHAPE{}))
     {
+        if(is_first_finalize)
+        {
+            col_buffer=allocate_gpu(device::compute_col_shape(inputs[0],inputs[1],op.padding,op.stride,op.dilation),false);
+            is_first_finalize=false;
+        }
         return;
     }
     else
@@ -206,7 +176,11 @@ void miopen_convolution_dynamic::finalize(context& ctx,
         // 首次需要分配workspace
         if(is_first_finalize)
         {
-            cd = make_conv(op);
+            if(cd == nullptr)
+            {
+                cd = make_conv(op,true);
+            }
+            shape ws   = find(ctx, output_shape, inputs);
             workspace_arg=allocate_gpu(inputs.at(2),false);
             is_first_finalize=false;
         }

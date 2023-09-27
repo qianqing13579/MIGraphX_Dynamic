@@ -333,7 +333,17 @@ void nary_impl(hipStream_t stream, F f, argument result, Arguments... args)
         all_of(shapes, [&](const shape& s) { return s == result.get_shape(); });
     const bool same_input_shapes = all_of(shapes, [&](const shape& s) { return s == shapes[0]; });
     if((result.get_shape().standard() and standard) or (packed and same_shapes))
-        nary_standard_impl(stream, f, result, args...);
+    {
+        if(result.get_shape().elements()%4==0)
+        {
+            nary_standard_vec_impl(stream, f, result, args...);
+        }
+        else
+        {
+            nary_standard_impl(stream, f, result, args...);
+        }
+        
+    }
     else if(packed and same_input_shapes)
         nary_nonstandard_packed_impl(stream, f, result, args...);
     else

@@ -143,7 +143,11 @@ void miopen_convolution::finalize(context& ctx,
     // 首次需要分配workspace
     if(is_first_finalize)
     {
-        cd = make_conv(op);
+        if(cd == nullptr)
+        {
+            cd = make_conv(op);
+        }
+        shape ws   = find(ctx, output_shape, inputs); // 加载mxr静态模型的时候，需要执行find
         workspace_arg=allocate_gpu(inputs.at(2),false);
         is_first_finalize=false;
     }

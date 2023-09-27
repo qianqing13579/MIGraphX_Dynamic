@@ -110,14 +110,8 @@ struct miopen_apply
 
         offload_copy = (mod->name() == "main") ? pass->offload_copy : false;
 
-        /* 对于同时实现了静态shape和动态shape的算子: 静态shape模式中采用静态实现，动态shape模式中使用动态实现
-        
-        这部分算子的静态实现通过如下方式实现：
-        1. fuse_pointwise pass将pointwise算子实现为jit方式
-        1. lowering pass中apply()的insert_precompile_op将softmax,reduce,concat等算子实现为jit方式
-        1. rewrite_rnn将LSTM展开
-        */
-        if(mod->get_dynamic())
+        // 动态实现
+        if(mod->get_dynamic()) 
         {
             // pointwise算子的静态实现在fuse_pointwise pass中，最终通过src/targets/gpu/jit/pointwise.cpp实现
             add_generic_op("acos");
@@ -162,18 +156,20 @@ struct miopen_apply
             add_generic_op("tan");
             add_generic_op("tanh");
             add_generic_op("where");
-
             add_extend_op("abs");
             add_extend_op("clip");
             add_extend_op("convert");
             add_extend_op("elu");
             add_extend_op("leaky_relu");
-            add_extend_op("selu"); // 添加selu
+            add_extend_op("selu");
             add_extend_op("Shape");
             add_extend_op("range");
             add_extend_op("constantofshape");
 
-            // 这些算子在静态shape模式中被解析为src/targets/gpu/jit中的实现
+            // 这些算子的静态实现通过src/targets/gpu/jit实现
+            add_generic_op("scatternd_none");
+            add_extend_op("pad"); // 动态模式中有些模型也可能存在pad算子，比如ModelZoo/Dynamic/tinyyolov2-8_Nx3x416x416.onnx
+            add_extend_op("pad_dynamic");
             add_extend_op("softmax");
             add_extend_op("concat");
             add_extend_op("reduce_max");
@@ -181,7 +177,9 @@ struct miopen_apply
             add_extend_op("reduce_min");
             add_extend_op("reduce_prod");
             add_extend_op("reduce_sum");
+            add_extend_op("gather");
 
+            // veiw算子(产生view,所以不需要分配输出内存)
             add_reshape_dynamic_op();
             add_slice_dynamic_op();
             add_multibroadcast_dynamic_op();
@@ -189,35 +187,33 @@ struct miopen_apply
             // 静态实现在rewrite_rnn这个pass中
             add_lstm_op();
 
-            // scatternd相关算子
-            add_generic_op("scatternd_none");
+            // 卷积的动态实现
+            add_convolution_op_dynamic();
 
-            // 动态卷积
-            add_convolution_op_dynamic();// 目前该实现还未完善
-            // add_convolution_op();
+            add_extend_op("tile");
 
         }
-        else
+        // 静态实现
+        else 
         {
-            // 静态卷积
+            add_extend_op("pad");
+
+            // 卷积的静态实现
             add_convolution_op();
 
         }
 
-        // contiguous算子特殊处理，contiguous属于pointwise算子，但是由于后续pass需要用到contiguous算子，所以这里不能与上面算子一起处理
-        // 该算子的静态shape实现在fuse_ops中使用find_contiguous匹配器替换为jit实现
+        // contiguous算子特殊处理，contiguous虽然属于pointwise算子，但是由于后面的eliminate_contiguous这个pass需要用到contiguous算子
+        // 所以这里不能使用jit实现，在fuse_ops这个pass中会使用find_contiguous匹配器将剩下的gpu::contiguous替换为jit实现
         add_generic_op("contiguous"); 
 
         // 对于只实现了动态shape的算子，只使用动态实现（可以适用于静态shape和动态shape）
-        add_extend_op("gather");
         add_extend_op("argmax"); 
         add_extend_op("argmin");
         add_extend_op("logsoftmax");
         add_extend_op("lrn");
-        add_extend_op("multinomial");
+        // add_extend_op("multinomial");
         add_extend_op("nonzero");
-        add_extend_op("pad");
-        add_extend_op("pad_dynamic");
         add_extend_op("pooling");
         add_extend_op("prefix_scan_sum");
         add_extend_op("reverse");
@@ -229,6 +225,7 @@ struct miopen_apply
         add_extend_op("upsample");
         add_extend_op("resize");
         add_extend_op("scatter_elements");
+        
 
         add_batch_norm_inference_op();
         add_deconvolution_op();
@@ -239,9 +236,6 @@ struct miopen_apply
         add_neg_op();
         add_nms_op();
         add_quant_convolution_op();
-
-        // 对于只实现了静态shape的算子，比如roialign，scatternd_none，scatternd_add, scatternd_mul，只能使用静态实现
-        
     }
 
     void copy_params() const
@@ -287,6 +281,7 @@ struct miopen_apply
         }
     }
 
+    // lowering的时候先使用apply_map，然后再使用jit实现，所以动态实现需要保存到apply_map中
     void apply()
     {
         init();

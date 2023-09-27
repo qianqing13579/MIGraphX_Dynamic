@@ -87,6 +87,10 @@ struct parse_constant_of_shape : op_parser<parse_constant_of_shape>
                     std::vector<std::size_t> dims;
                     in.visit([&](auto input) { dims.assign(input.begin(), input.end()); });
                     s = migraphx::shape{type, dims};
+                    if(args[0]->name()=="@literal")
+                    {
+                        op.is_const=1;
+                    }
                 }
                 op.output_shape=s;
             }

@@ -72,50 +72,62 @@ static shape compute_shape_dynamic(const shape& input,const std::vector<std::siz
 
 argument hip_multibroadcast_dynamic::compute(context& ctx, const shape& output_shape, const std::vector<argument>& args) const
 {
-
-    if(args[1].get_shape().type()==shape::int64_type)
+    if(op.is_const==0)
     {
-        std::vector<int64_t> shape_data(args[1].get_shape().elements());
-
-        // 拷贝到gpu
-        hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
-        
-        ctx.finish();
-        
-        // 重新计算输出shape
-        std::vector<std::size_t> shape_data2(args[1].get_shape().elements());
-        for(int i=0;i<shape_data.size();++i)
+        if(args[1].get_shape().type()==shape::int64_type)
         {
-            shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
+            std::vector<int64_t> shape_data(args[1].get_shape().elements());
+
+            // 拷贝到gpu
+            hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+            
+            ctx.finish();
+            
+            // 重新计算输出shape
+            std::vector<std::size_t> shape_data2(args[1].get_shape().elements());
+            for(int i=0;i<shape_data.size();++i)
+            {
+                shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
+            }
+            auto out_lens = compute_broadcasted_lens(args[0].get_shape().lens(), shape_data2);
+            shape new_shape=compute_shape_dynamic(args[0].get_shape(),out_lens);
+            
+            return args[0].reshape(new_shape);
+
         }
-        auto out_lens = compute_broadcasted_lens(args[0].get_shape().lens(), shape_data2);
-        shape new_shape=compute_shape_dynamic(args[0].get_shape(),out_lens);
-        
-        return args[0].reshape(new_shape);
+        else
+        {
+            // 计算dim，shape tensor在FP16模式下还是float类型
+            std::vector<float> shape_data(args[1].get_shape().elements());
+
+            // 拷贝到gpu
+            hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+            
+            ctx.finish();
+            
+            // 重新计算输出shape
+            std::vector<std::size_t> shape_data2(args[1].get_shape().elements());
+            for(int i=0;i<shape_data.size();++i)
+            {
+                shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
+            }
+            auto out_lens = compute_broadcasted_lens(args[0].get_shape().lens(), shape_data2);
+            shape new_shape=compute_shape_dynamic(args[0].get_shape(),out_lens);
+            
+            return args[0].reshape(new_shape);
+
+        }
 
     }
     else
     {
-        // 计算dim，shape tensor在FP16模式下还是float类型
-        std::vector<float> shape_data(args[1].get_shape().elements());
-
-        // 拷贝到gpu
-        hipMemcpyAsync(shape_data.data(), args[1].data(), args[1].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
-        
-        ctx.finish();
-        
-        // 重新计算输出shape
-        std::vector<std::size_t> shape_data2(args[1].get_shape().elements());
-        for(int i=0;i<shape_data.size();++i)
-        {
-            shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
-        }
-        auto out_lens = compute_broadcasted_lens(args[0].get_shape().lens(), shape_data2);
+        auto out_lens = compute_broadcasted_lens(args[0].get_shape().lens(), op.dims);
         shape new_shape=compute_shape_dynamic(args[0].get_shape(),out_lens);
         
         return args[0].reshape(new_shape);
-
     }
+
+    
 
     
 

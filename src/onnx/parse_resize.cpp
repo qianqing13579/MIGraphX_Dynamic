@@ -291,17 +291,7 @@ struct parse_resize : op_parser<parse_resize>
         {
             mode_=2;
         }
-        int align_corners=0;
-        if(coord_trans_mode=="align_corners")
-        {
-            align_corners=1;
-        }
-        else
-        {
-            align_corners=0;
-        }
-        
-        return info.add_instruction(make_op("resize", {{"scales", vec_scale},{"max_size", out_lens},{"mode",mode_},{"align_corners",align_corners}}), 
+        return info.add_instruction(make_op("resize", {{"scales", vec_scale},{"max_size", out_lens},{"mode",mode_},{"coordinate_transformation_mode",coord_trans_mode}}), 
                                     new_args);
     }
 };

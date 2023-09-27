@@ -36,32 +36,41 @@ shape hip_constantofshape::compute_shape(std::vector<shape> inputs) const
 
 argument hip_constantofshape::compute(context& ctx, const shape& output_shape, const std::vector<argument>& args) const
 {
-    // 计算dim，shape tensor在FP16模式下还是float类型
-    std::vector<float> shape_data(args[0].get_shape().elements());
-
-    // 拷贝到gpu
-    hipMemcpyAsync(shape_data.data(), args[0].data(), args[0].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
-    
-    ctx.finish();
-    
-    // 重新计算输出shape
-    std::vector<std::size_t> shape_data2(args[0].get_shape().elements());
-    for(int i=0;i<shape_data.size();++i)
-    {
-        shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
-    }
-
     // 重新生成常量
     auto type = op.value.get_shape().type();
     migraphx::shape s;
-    if(shape_data2.size() == 0) // 如果为空，则是一个标量
+    if(op.is_const==0)
     {
-        s = migraphx::shape{type, {1}, {0}};
+        // 计算dim，shape tensor在FP16模式下还是float类型
+        std::vector<float> shape_data(args[0].get_shape().elements());
+
+        // 拷贝到gpu
+        hipMemcpyAsync(shape_data.data(), args[0].data(), args[0].get_shape().bytes(), hipMemcpyDeviceToHost,ctx.get_stream().get());
+        
+        ctx.finish();
+        
+        // 重新计算输出shape
+        std::vector<std::size_t> shape_data2(args[0].get_shape().elements());
+        for(int i=0;i<shape_data.size();++i)
+        {
+            shape_data2[i]=static_cast<std::size_t>(shape_data[i]);
+        }
+        
+        if(shape_data2.size() == 0) // 如果为空，则是一个标量
+        {
+            s = migraphx::shape{type, {1}, {0}};
+        }
+        else
+        {
+            s = migraphx::shape{type, shape_data2};
+        }
+
     }
     else
     {
-        s = migraphx::shape{type, shape_data2};
+        s=op.output_shape;
     }
+    
     migraphx::argument result{s};
     op.value.visit([&](auto val) {
         auto data=val.front();

@@ -37,14 +37,17 @@ struct context;
 struct miopen_deconvolution
 {
     op::deconvolution op;
-    shared<convolution_descriptor> cd;
+    shared<convolution_descriptor> cd = nullptr;
     miopenConvFwdAlgorithm_t algo{};
     uint64_t solution_id = 0;
 
     // 为了适应动态shape，每次workspace不够的时候，需要重新申请workspace
-    bool is_first=true;
+    bool is_first_finalize=true;
     argument workspace_arg;
 
+    // 缓存
+    std::unordered_map<std::string,miopenConvAlgoPerf_t> perf_buffer;
+    
     template <class Self, class F>
     static auto reflect(Self& self, F f)
     {

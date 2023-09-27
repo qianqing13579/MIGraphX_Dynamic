@@ -38,11 +38,12 @@ struct constantofshape
 {
     shape output_shape;
     literal value;
+    int is_const=0;
 
     template <class Self, class F>
     static auto reflect(Self& self, F f)
     {
-        return pack(f(self.output_shape, "max_shape"), f(self.value, "value"));
+        return pack(f(self.output_shape, "max_shape"), f(self.value, "value"),f(self.is_const,"is_const"));
     }
 
     std::string name() const { return "constantofshape"; }

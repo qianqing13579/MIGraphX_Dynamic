@@ -223,14 +223,10 @@ struct parse_pad : op_parser<parse_pad>
                 auto mode = info.attributes.at("mode").s();
                 if(mode == "reflect")
                     return reflect_pad(info, pads, args.front());
-                if(mode == "edge")
-                {
-                    return info.add_instruction(migraphx::make_op("pad_dynamic", {{"mode",2},{"max_pads", pads}}),args);
-                }
                 if(mode != "constant")
                 {
                     MIGRAPHX_THROW(
-                        "PARSE_PAD: migraphx currently only supports constant reflect and edge padding");
+                        "PARSE_PAD: migraphx currently only supports constant and reflect padding");
                 }
             }
 

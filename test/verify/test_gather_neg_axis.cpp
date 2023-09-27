@@ -27,7 +27,7 @@
 #include <migraphx/generate.hpp>
 #include <migraphx/make_op.hpp>
 
-struct test_gather_neg_axis : verify_program<test_gather_neg_axis>
+struct test_gather_pos_neg_indices : verify_program<test_gather_pos_neg_indices>
 {
     migraphx::program create_program() const
     {
@@ -35,11 +35,13 @@ struct test_gather_neg_axis : verify_program<test_gather_neg_axis>
         auto* mm = p.get_main_module();
         migraphx::shape s{migraphx::shape::float_type, {3, 3}};
         migraphx::shape s_indices{migraphx::shape::int32_type, {2, 2}};
-        std::vector<int> indices{1, 2, 2, 1};
+        std::vector<int> indices{-2, 2, 2, -2};
         auto a0  = mm->add_parameter("data", s);
         auto a1  = mm->add_literal(migraphx::literal{s_indices, indices});
         int axis = -1;
-        mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
+        auto r = mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
+        mm->add_return({r});
+        
         return p;
     }
 };

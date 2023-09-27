@@ -17,9 +17,8 @@ argument hip_upsample::compute(context& ctx,const shape& output_shape,const std:
 {
     std::vector<float> scales=op.scales;
     int mode=op.mode;
-    int align_corners=op.align_corners;
 
-    device::upsample(ctx.get_stream().get(), args[1], args[0],scales,mode,align_corners);
+    device::upsample(ctx.get_stream().get(), args[1], args[0],scales,mode,"asymmetric");
 
     return args[1];
 }

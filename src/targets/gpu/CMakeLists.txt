@@ -118,6 +118,7 @@ add_library(migraphx_device
     device/sub.cpp
     device/tan.cpp
     device/tanh.cpp
+    device/tile.cpp
     device/topk.cpp
     device/unary_not.cpp
     device/upsample.cpp
@@ -218,6 +219,7 @@ add_library(migraphx_gpu
     softmax.cpp
     sync_device.cpp
     target.cpp
+    tile.cpp
     topk.cpp
     upsample.cpp
     write_literals.cpp
@@ -302,6 +304,7 @@ register_migraphx_gpu_ops(hip_
     sub
     tanh
     tan
+    tile
     topk
     unary_not
     upsample

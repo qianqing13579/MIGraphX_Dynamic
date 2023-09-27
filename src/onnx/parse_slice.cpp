@@ -76,6 +76,11 @@ struct parse_slice : op_parser<parse_slice>
                 migraphx::argument end_arg = args.at(2)->eval_for_shape();
                 check_arg_empty(end_arg, "PARSE_SLICE: cannot handle variable ends for slice");
                 end_arg.visit([&](auto s) { op.ends.assign(s.begin(), s.end()); });
+                
+                if(args[2]->name()=="@literal")
+                {
+                    op.is_const_ends=1;
+                }
             }
             else if(contains(info.attributes, "ends"))
             {
@@ -88,6 +93,11 @@ struct parse_slice : op_parser<parse_slice>
                 migraphx::argument start_arg = args.at(1)->eval_for_shape();
                 check_arg_empty(start_arg, "PARSE_SLICE: cannot handle variable starts for slice");
                 start_arg.visit([&](auto s) { op.starts.assign(s.begin(), s.end()); });
+
+                if(args[1]->name()=="@literal")
+                {
+                    op.is_const_stars=1;
+                }
             }
             else if(contains(info.attributes, "starts"))
             {

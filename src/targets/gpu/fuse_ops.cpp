@@ -441,7 +441,7 @@ MIGRAPHX_REGISTER_OP(hip_shape_convert)
 struct hip_gather_for_shape
 {
     int64_t axis = 0;
-    int index=0;
+    std::vector<int> index;
     bool is_first=true;
     argument result;
 
@@ -485,7 +485,10 @@ struct hip_gather_for_shape
     argument compute(context& ctx,const shape& output_shape, std::vector<argument> args) const
     {
         // 计算gather
-        ((float*)result.data())[0]=((float*)args[0].data())[index];
+        for(int i=0;i<index.size();++i)
+        {
+            ((float*)result.data())[i]=((float*)args[0].data())[index[i]];
+        }
 
         // 将计算结果拷贝到gpu
         hipMemcpyAsync(args.back().data(), result.data(), result.get_shape().bytes(), hipMemcpyHostToDevice,ctx.get_stream().get());
@@ -621,20 +624,55 @@ struct find_add_gelu
 
 struct find_gelu_new
 {
-    bool fast_math = true;
+    bool fast_math = false;
 
-    auto matcher() const { return match::gelu_tanh(&gpu_name); }
+    auto matcher() const 
+    { 
+        return match::name("gpu::mul")
+        (
+            match::either_arg(0, 1)
+            (
+                match::name("gpu::mul")(match::used_once(),match::either_arg(0, 1)(match::has_value(0.5f, 1e-3),match::any().bind("x"))),
+                match::name("gpu::add")
+                (
+                   match::either_arg(0, 1)
+                   (
+                    match::has_value(1.0f, 1e-3),
+                    match::name("gpu::tanh")(match::used_once(),
+                    match::arg(0)(match::name("gpu::mul")(match::used_once(),
+                    match::either_arg(0, 1)
+                    (
+                        match::has_value(0.7978f, 1e-3),
+                        match::name("gpu::add")(match::used_once(),
+                        match::either_arg(0, 1)(
+                            match::name("gpu::mul")(match::used_once(),
+                            match::either_arg(0, 1)(
+                                match::has_value(0.0447f, 1e-3),
+                                match::name("gpu::pow")(match::used_once(),match::either_arg(0, 1)(match::has_value(3.0f, 1e-3),match::any().bind("z"))))),
+                            match::any().bind("y"))
+                            )
+                    ))))
+                    ) 
+                )
+
+            )
+        );
+    }
 
     void apply(module& m, const match::matcher_result& r) const
     {
         auto ins   = r.result;
         auto x_ins = r.instructions["x"];
+        auto y_ins = r.instructions["y"];
+        auto z_ins = r.instructions["z"];
         auto args  = ins->inputs();
 
-        if(fast_math)
-            m.replace_instruction(ins, hip_gelu{}, x_ins, args.back());
-        else
+        if((x_ins->get_shape()==y_ins->get_shape())&&
+            (y_ins->get_shape()==z_ins->get_shape()))
+        {
             m.replace_instruction(ins, hip_gelu_new{}, x_ins, args.back());
+        }
+        
     }
 };
 
@@ -971,11 +1009,16 @@ struct find_gather_for_shape
 
         // 获取gather的索引
         argument index=ins_arg[1]->eval();
+        std::vector<int> index2;
+        for(int i=0;i<index.get_shape().elements();++i)
+        {
+            index2.push_back(int(((float *)index.data())[i]));
+        }
 
         // 删除第二个参数
         ins_arg.erase(ins_arg.begin() + 1);
         
-        m.replace_instruction(ins, hip_gather_for_shape{axis,int(((float *)index.data())[0])}, ins_arg);
+        m.replace_instruction(ins, hip_gather_for_shape{axis,index2}, ins_arg);
     }
 };
 
@@ -1768,6 +1811,7 @@ struct find_layernorm_pointwise
 
 void fuse_ops::apply(module& m) const
 {
+    // transformer中的gelu算子融合
     match::find_matches(m, find_contiguous_pointwise{}, find_gelu{}, find_gelu_new{fast_math});
     run_passes(m, {dead_code_elimination{}});
     match::find_matches(m, find_triadd{});
@@ -1784,7 +1828,7 @@ void fuse_ops::apply(module& m) const
     
     run_passes(m, {dead_code_elimination{}});
     match::find_matches(m,
-                        // find_layernorm{},
+                        // find_layernorm{},// 动态layernorm融合
                         find_conv_pointwise{ctx},
                         find_conv_bias_relu{ctx},
                         find_conv_bias{ctx},
@@ -1798,14 +1842,14 @@ void fuse_ops::apply(module& m) const
                         find_add_clip{});
     run_passes(m, {dead_code_elimination{}});
     match::find_matches(m,
-                        find_triadd_layernorm{},
+                        // find_triadd_layernorm{},// 动态layernorm融合
                         find_gemm_add{},
-                        find_layernorm_pointwise{},
+                        // find_layernorm_pointwise{},// 静态layernorm融合
                         find_gemm_pointwise{},
                         find_contiguous_tranpose_gemm{},
                         find_commutative_broadcast{});
 
-    // gpt2算子融合
+    // gpt2/bert算子融合
     run_passes(m, {dead_code_elimination{}});
     match::find_matches(m,
                         find_mul_add_sqrt{},

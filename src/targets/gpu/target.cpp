@@ -125,7 +125,7 @@ std::vector<pass> target::get_passes(migraphx::context& gctx, const compile_opti
         enable_pass(!options.is_dynamic, simplify_algebra{}),
         simplify_reshapes{},
         enable_pass(!options.is_dynamic, simplify_algebra{}),
-        enable_pass(!options.is_dynamic, prefuse_ops{}),
+        enable_pass(false, prefuse_ops{}),// 静态layernorm融合，有精度问题，暂时禁用
         dead_code_elimination{},
         auto_contiguous{},
         simplify_reshapes{},

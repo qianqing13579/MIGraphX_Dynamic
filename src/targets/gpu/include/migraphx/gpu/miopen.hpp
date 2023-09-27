@@ -36,11 +36,11 @@
 
 #include <sstream>
 
-#ifdef MIGRAPHX_HAS_FIND_MODE_API
+// #ifdef MIGRAPHX_HAS_FIND_MODE_API
 extern "C" miopenStatus_t
 miopenHiddenSetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc, // NOLINT
                                    int findMode);                          // NOLINT
-#endif
+// #endif
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {

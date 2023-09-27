@@ -21,27 +21,44 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef MIGRAPHX_GUARD_KERNELS_GATHER_HPP
+#define MIGRAPHX_GUARD_KERNELS_GATHER_HPP
 
-#include "verify_program.hpp"
-#include <migraphx/program.hpp>
-#include <migraphx/generate.hpp>
-#include <migraphx/make_op.hpp>
+#include <migraphx/kernels/index.hpp>
+#include <migraphx/kernels/shape.hpp>
+#include <migraphx/kernels/algorithm.hpp>
+#include <migraphx/kernels/tensor_view.hpp>
 
-struct test_gather : verify_program<test_gather>
+namespace migraphx {
+
+template <int Axis, class Input, class Indices>
+constexpr auto gather_shape(Input input, Indices indices)
 {
-    migraphx::program create_program() const
-    {
-        migraphx::program p;
-        auto* mm = p.get_main_module();
-        migraphx::shape s{migraphx::shape::float_type, {3, 3}};
-        migraphx::shape s_indices{migraphx::shape::int32_type, {2, 2}};
-        std::vector<int> indices{1, 2, 2, 1};
-        auto a0  = mm->add_parameter("data", s);
-        auto a1  = mm->add_literal(migraphx::literal{s_indices, indices});
-        int axis = 0;
-        auto r = mm->add_instruction(migraphx::make_op("gather", {{"axis", axis}}), a0, a1);
-        mm->add_return({r});
-        
-        return p;
-    }
-};
+    auto lengths = input.lens;
+
+    lengths[Axis] = indices.elements();
+    return make_shape(lengths, input.strides);
+}
+
+template <int Axis, class Input, class Indices, class Output>
+__device__ void gather(Input input, Indices indices, Output output)
+{
+    auto ind           = make_index();
+    auto axis_dim_size = input.get_shape().lens[Axis];
+
+    constexpr auto out_comp = gather_shape<Axis>(get_shape_c<Input>{}, get_shape_c<Indices>{});
+
+    ind.global_stride(output.get_shape().elements(), [&](auto i) {
+        auto idx      = out_comp.multi(i);
+        auto in_index = indices[idx[Axis]];
+
+        auto new_in_index = (in_index < 0) ? in_index + axis_dim_size : in_index;
+
+        idx[Axis] = new_in_index;
+
+        output[i] = input[idx];
+    });
+}
+
+} // namespace migraphx
+#endif

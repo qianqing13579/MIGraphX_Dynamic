@@ -39,11 +39,13 @@ namespace op {
 struct reshape_dynamic
 {
     std::vector<int64_t> dims;
+    int is_const=0;// 动态shape中第二个参数是否是常量
 
     template <class Self, class F>
     static auto reflect(Self& self, F f)
     {
-        return pack(f(self.dims, "max_dims"));
+        return pack(f(self.dims, "max_dims"),
+                    f(self.is_const,"is_const"));
     }
 
     value attributes() const { return {{"require_std_shape", true}}; }

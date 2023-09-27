@@ -21,7 +21,7 @@ struct resize
     std::vector<float> scales;
     std::vector<int64_t> sizes;
     int mode = 0; // 1: nereast 2: bilinear/linear 3: cubic
-    int align_corners = 0;
+    std::string coordinate_transformation_mode;
 
     std::string name() const { return "resize"; }
 
@@ -31,12 +31,12 @@ struct resize
         return pack(f(self.scales, "scales"),
                     f(self.sizes, "max_size"),
                     f(self.mode,"mode"),
-                    f(self.align_corners,"align_corners"));
+                    f(self.coordinate_transformation_mode,"coordinate_transformation_mode"));
     }
 
     shape compute_shape(std::vector<shape> inputs) const
     {
-        check_shapes{{inputs[0]}, *this}.has(1).standard();
+        check_shapes{{inputs[0]}, *this}.has(1);
 
         if(!scales.empty())
         {

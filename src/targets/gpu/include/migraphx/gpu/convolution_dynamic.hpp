@@ -43,6 +43,7 @@ struct miopen_convolution_dynamic
 
     // 为了适应动态shape，每次workspace不够的时候，需要重新申请workspace
     bool is_first_finalize=true;
+    argument col_buffer;
     argument workspace_arg;
 
     // 缓存

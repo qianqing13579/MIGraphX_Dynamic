@@ -38,6 +38,7 @@ struct file_options
 };
 
 program load(const std::string& filename, const file_options& options = file_options{});
+int load_mxr_version(const std::string& filename, const file_options& options = file_options{});
 program load_buffer(const std::vector<char>& buffer, const file_options& options = file_options{});
 program
 load_buffer(const char* buffer, std::size_t size, const file_options& options = file_options{});
