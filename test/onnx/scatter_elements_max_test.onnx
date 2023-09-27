@@ -1,0 +1,23 @@
+scatter_elements_max_test:Î
+N
+data
+indices
+updatesy"ScatterElements*
+axis *
+	reduction"max scatter_elements_max_testZ
+data
+
+
+Z
+indices
+
+
+Z
+updates
+
+
+b
+y
+
+
+B

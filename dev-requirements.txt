@@ -1,0 +1,14 @@
+# pfultz2/rocm-recipes
+# facebook/zstd@v1.4.5 -X subdir -DCMAKE_DIR=build/cmake
+# ccache@v4.1
+# pcre,pfultz2/pcre@8.45 -H sha256:d6f7182602a775a7d500a0cedca6449af0400c6493951513046d17615ed0bf11
+# danmar/cppcheck@2.6 -DHAVE_RULES=1
+# RadeonOpenCompute/rocm-cmake@1ebf7e7bc61bb5e949c171562b421264065230a7 --build
+# -f requirements.txt
+
+############## 使用离线下载的依赖库 ##############
+./3rdParty/rocm-recipes-6978cc6fbb08381dcbe3e70355676f41e8f56f42.tar.gz
+./3rdParty/zstd-1.4.5.tar.gz -X subdir -DCMAKE_DIR=build/cmake
+./3rdParty/ccache-v4.1.tar.gz -DENABLE_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=On
+./3rdParty/pcre-8.45.tar.gz -DCMAKE_POSITION_INDEPENDENT_CODE=On -H sha256:d6f7182602a775a7d500a0cedca6449af0400c6493951513046d17615ed0bf11
+-f requirements.txt

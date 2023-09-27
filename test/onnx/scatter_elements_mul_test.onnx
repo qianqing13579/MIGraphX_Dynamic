@@ -1,0 +1,23 @@
+scatter_elements_mul_test:Î
+N
+data
+indices
+updatesy"ScatterElements*
+axis *
+	reduction"mul scatter_elements_mul_testZ
+data
+
+
+Z
+indices
+
+
+Z
+updates
+
+
+b
+y
+
+
+B

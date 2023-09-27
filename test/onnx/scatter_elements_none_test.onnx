@@ -1,0 +1,23 @@
+scatter_elements_none_test:Ð
+O
+data
+indices
+updatesy"ScatterElements*
+axis *
+	reduction"none scatter_elements_none_testZ
+data
+
+
+Z
+indices
+
+
+Z
+updates
+
+
+b
+y
+
+
+B
