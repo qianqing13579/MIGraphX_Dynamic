@@ -1,0 +1,23 @@
+scatter_elements_min_test:Î
+N
+data
+indices
+updatesy"ScatterElements*
+axis *
+	reduction"min scatter_elements_min_testZ
+data
+
+
+Z
+indices
+
+
+Z
+updates
+
+
+b
+y
+
+
+B

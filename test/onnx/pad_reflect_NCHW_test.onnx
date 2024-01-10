@@ -1,0 +1,19 @@
+pad_reflect_NCHW_test:°
+6pads"Constant*$
+value*:Bpad_size 
+%
+0
+pads1"Pad*
+mode"reflect pad_reflect_NCHW_testZ
+0
+
+
+
+
+b
+1
+
+
+
+
+B

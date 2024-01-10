@@ -1,0 +1,156 @@
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2015-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+#include <migraphx/onnx/op_parser.hpp>
+#include <migraphx/onnx/checks.hpp>
+#include <migraphx/ranges.hpp>
+#include <migraphx/instruction.hpp>
+#include <migraphx/literal.hpp>
+#include <migraphx/make_op.hpp>
+#include <migraphx/op/constantofshape.hpp>
+
+namespace migraphx {
+inline namespace MIGRAPHX_INLINE_NS {
+namespace onnx {
+
+struct parse_constant_of_shape : op_parser<parse_constant_of_shape>
+{
+    std::vector<op_desc> operators() const { return {{"ConstantOfShape"}}; }
+
+    instruction_ref parse(const op_desc& /*opd*/,
+                          const onnx_parser& parser,
+                          onnx_parser::node_info info,
+                          std::vector<instruction_ref> args) const
+    {
+        // 动态实现
+        if(info.mod->get_dynamic())
+        {
+            //
+            op::constantofshape op;
+
+            literal l_val{};
+            if(contains(info.attributes, "value"))
+            {
+                l_val = parser.parse_value(info.attributes.at("value"));
+                if(l_val.get_shape().elements() != 1)
+                {
+                    MIGRAPHX_THROW("ConstantOfShape: attribute value can contain only 1 elements!");
+                }
+            }
+            else
+            {
+                l_val = literal({shape::float_type, {1}, {0}}, {0.0f});
+            }
+            op.value = l_val;
+
+            // input is empty, output is a scalar
+            auto type = l_val.get_shape().type();
+
+            if(args.empty())
+            {
+                MIGRAPHX_THROW("ConstantOfShape : must have 1 input!");
+            }
+            else
+            {
+                migraphx::shape s;
+                // empty input tensor, output is a scalar
+                if(args[0]->get_shape().elements() == 0)
+                {
+                    s = migraphx::shape{type, {1}, {0}};
+                }
+                else
+                {
+                    migraphx::argument in = args[0]->eval_for_shape();
+                    check_arg_empty(in, "ConstantOfShape: dynamic shape is not supported");
+
+                    std::vector<std::size_t> dims;
+                    in.visit([&](auto input) { dims.assign(input.begin(), input.end()); });
+                    s = migraphx::shape{type, dims};
+                    if(args[0]->name() == "@literal")
+                    {
+                        op.is_const = 1;
+                    }
+                }
+                op.output_shape = s;
+            }
+
+            return info.add_instruction(op, args[0]);
+        }
+        else
+        {
+            literal l_val{};
+            if(contains(info.attributes, "value"))
+            {
+                l_val = parser.parse_value(info.attributes.at("value"));
+                if(l_val.get_shape().elements() != 1)
+                {
+                    MIGRAPHX_THROW("ConstantOfShape: attribute value can contain only 1 elements!");
+                }
+            }
+            else
+            {
+                l_val = literal({shape::float_type, {1}, {0}}, {0.0f});
+            }
+
+            // input is empty, output is a scalar
+            auto type = l_val.get_shape().type();
+
+            if(args.empty())
+            {
+                MIGRAPHX_THROW("ConstantOfShape : must have 1 input!");
+            }
+            else
+            {
+                migraphx::shape s;
+                // empty input tensor, output is a scalar
+                if(args[0]->get_shape().elements() == 0)
+                {
+                    s = migraphx::shape{type, {1}, {0}};
+                }
+                else
+                {
+                    migraphx::argument in = args[0]->eval();
+                    check_arg_empty(in, "ConstantOfShape: dynamic shape is not supported");
+
+                    std::vector<std::size_t> dims;
+                    in.visit([&](auto input) { dims.assign(input.begin(), input.end()); });
+                    s = migraphx::shape{type, dims};
+                }
+
+                literal l_out{};
+                l_val.visit([&](auto val) {
+                    using val_type = std::remove_cv_t<typename decltype(val)::value_type>;
+                    // l_val contains only one element
+                    std::vector<val_type> out_vec(s.elements(), val.front());
+                    l_out = literal(s, out_vec);
+                });
+
+                return info.add_literal(l_out);
+            }
+        }
+    }
+};
+
+} // namespace onnx
+} // namespace MIGRAPHX_INLINE_NS
+} // namespace migraphx

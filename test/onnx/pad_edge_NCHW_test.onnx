@@ -1,0 +1,19 @@
+pad_edge_NCHW_test:ª
+6pads"Constant*$
+value*:Bpad_size 
+"
+0
+pads1"Pad*
+mode"edge pad_edge_NCHW_testZ
+0
+
+
+
+
+b
+1
+
+
+
+
+B

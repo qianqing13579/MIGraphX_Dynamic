@@ -1,0 +1,23 @@
+scatter_elements_add_test:Î
+N
+data
+indices
+updatesy"ScatterElements*
+axis *
+	reduction"add scatter_elements_add_testZ
+data
+
+
+Z
+indices
+
+
+Z
+updates
+
+
+b
+y
+
+
+B
